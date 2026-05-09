@@ -1,0 +1,198 @@
+defaults:
+  aggregation_type: regular
+  partition_type: iid
+  n_clients: [3, 6, 10]
+  leaky_train_frac: 0.1
+  canary_frac: 0.01
+  canary_dups: 5
+  canary_flip: true
+
+experiments:
+
+  # ==========================================================
+  # BODY SIGNAL OF SMOKING
+  # ==========================================================
+  smoking_centralized_plain:
+    dataset: body_signal_of_smoking
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    no_fl: true
+    dp: false
+    leaky_train_frac: 1.0
+    canary_frac: 0.0
+    canary_dups: 0
+    canary_flip: false
+  
+  smoking_centralized_plain_leaky:
+    dataset: body_signal_of_smoking
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    no_fl: true
+    dp: false
+
+  smoking_centralized_dp_leaky:
+    dataset: body_signal_of_smoking
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    no_fl: true
+    dp: true
+    noise_multiplier: [1.4106, 0.47]
+    l2_norm_clip: [1.0]
+
+  smoking_fl_plain_leaky:
+    dataset: body_signal_of_smoking
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    dp: false
+
+  smoking_fl_dp_central_leaky:
+    dataset: body_signal_of_smoking
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    dp: true
+    local: false
+    clipping: server
+    noise_multiplier: [1.4106, 0.47]
+    l2_norm_clip: [1.0]
+
+  smoking_fl_dp_local_leaky:
+    dataset: body_signal_of_smoking
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    dp: true
+    local: true
+    epsilon: [1.0, 5.0]
+    l2_norm_clip: [1.0]
+
+  # ==========================================================
+  # CIFAR10
+  # ==========================================================
+  cifar10_centralized_plain:
+    dataset: cifar10
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    no_fl: true
+    dp: false
+    leaky_train_frac: 1.0
+    canary_frac: 0.0
+    canary_dups: 0
+    canary_flip: false
+
+  cifar10_centralized_plain_leaky:
+    dataset: cifar10
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    no_fl: true
+    dp: false
+    leaky_train_frac: 0.5
+
+  cifar10_centralized_dp_leaky:
+    dataset: cifar10
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    no_fl: true
+    dp: true
+    noise_multiplier: [0.6070, 0.1214]
+    l2_norm_clip: [1.0]
+    leaky_train_frac: 0.5
+
+  cifar10_fl_plain_leaky:
+    dataset: cifar10
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    dp: false
+    leaky_train_frac: 0.5
+
+  cifar10_fl_dp_central_leaky:
+    dataset: cifar10
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    dp: true
+    local: false
+    clipping: server
+    noise_multiplier: [0.6070, 0.1214]
+    l2_norm_clip: [1.0]
+    leaky_train_frac: 0.5
+
+  cifar10_fl_dp_local_leaky:
+    dataset: cifar10
+    batch_size: 16
+    epochs: 50
+    learning_rate: 0.001
+    dp: true
+    local: true
+    epsilon: [1.0, 5.0]
+    l2_norm_clip: [1.0]
+    leaky_train_frac: 0.5
+
+  # # ==========================================================
+  # # NETWORK MONITORING
+  # # ==========================================================
+  network_centralized_plain:
+    dataset: network_monitoring
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    no_fl: true
+    dp: false
+    leaky_train_frac: 1.0
+    canary_frac: 0.0
+    canary_dups: 0
+    canary_flip: false
+
+  network_centralized_plain_leaky:
+    dataset: network_monitoring
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    no_fl: true
+    dp: false
+
+  network_centralized_dp_leaky:
+    dataset: network_monitoring
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    no_fl: true
+    dp: true
+    noise_multiplier: [4.58, 0.916]
+    l2_norm_clip: [1.0]
+
+  network_fl_plain_leaky:
+    dataset: network_monitoring
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    dp: false
+
+  network_fl_dp_central_leaky:
+    dataset: network_monitoring
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    dp: true
+    local: false
+    clipping: server
+    noise_multiplier: [4.58, 0.916]
+    l2_norm_clip: [1.0]
+
+  network_fl_dp_local_leaky:
+    dataset: network_monitoring
+    batch_size: 128
+    epochs: 30
+    learning_rate: 0.001
+    dp: true
+    local: true
+    epsilon: [1.0, 5.0]
+    l2_norm_clip: [1.0]

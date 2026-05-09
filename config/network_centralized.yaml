@@ -1,0 +1,23 @@
+program: run.sh
+project: privacy_preserving_federated_learning
+method: grid
+
+parameters:
+  dataset:
+    value: "network_monitoring"
+  partition_type:
+    value: "centralized"
+  no_fl:
+    value: True
+  learning_rate:
+    values: [0.01, 0.001, 0.0001, 0.00001]
+  batch_size:
+    values: [32, 64, 128, 256]
+  epochs: 
+    values: [10, 20, 50]
+
+command:
+  - ${env}
+  - bash
+  - ${program}
+  - ${args}

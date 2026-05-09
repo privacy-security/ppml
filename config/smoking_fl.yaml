@@ -1,0 +1,31 @@
+program: run.sh
+project: privacy_preserving_federated_learning
+method: grid
+
+parameters:
+  dataset:
+    value: "body_signal_of_smoking"
+  aggregation_type:
+    value: "regular"
+  dp:
+    value: False
+  n_clients:
+    values: [3, 6, 10]
+  partition_type:
+    # values: ["iid", "noniid"]
+    value: "iid"
+  learning_rate:
+    value: 0.001
+  batch_size:
+    value: 128
+  epochs:
+    value: 30
+  l2_norm_clip:
+    values: [1, 5]
+  
+
+command:
+  - ${env}
+  - bash
+  - ${program}
+  - ${args}
