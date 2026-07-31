@@ -3,7 +3,7 @@ wandb/
 data/body_signal_of_smoking/data.csv
 data/body_signal_of_smoking/data_processed.csv
 data/cifar10/cifar10.npz
-data/household_power/household_power_consumption/txt
+data/household_power/household_power_consumption.txt
 venv/
 venv_dp/
 artifacts/
