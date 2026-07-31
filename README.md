@@ -2,17 +2,33 @@
 
 ![Privacy Enhanced Federated Architecture](./assets/FL_Framework.png)
 
+> **Confirm for your setup before publishing.** A few operational details can't be
+> read from the scripts alone; the placeholders below are marked `CONFIRM`:
+> - Python version / runtime. The scripts use a single `venv`; the record-level
+>   DP-SGD path (Keras 3) was developed in the NVIDIA NGC TensorFlow container.
+>   State the actual interpreter you ship with. `CONFIRM: Python version + venv vs. NGC container`
+> - Requirements filename(s). This README assumes `reqs_fl.txt`. `CONFIRM: exact filename`
+> - On-disk location of `dp_utils.py`, `seeding.py`, `analyze_results.py`,
+>   `analyze_attacks.py`, `generate_configs.py`, `generate_attack_configs.py`,
+>   `fetch_runs.py`. The tree below places them at plausible paths marked `CONFIRM`.
+
 ## Abstract
 
-Federated learning reduces the need to centralize raw data, but it does not by itself prevent privacy leakage from client updates, aggregation messages, or the final released model. This project implements and evaluates privacy-enhancing techniques in federated learning, especially Differential Privacy and Secure Aggregation, in a low-client-count cross-silo setting with full client participation. The evaluation covers three task types: image classification, tabular binary classification, and network-monitoring time-series prediction.
+Federated learning reduces the need to centralize raw data, but it does not by itself prevent privacy leakage from client updates, aggregation messages, or the final released model. This project implements and evaluates privacy-enhancing techniques in federated learning — Differential Privacy and Secure Aggregation — in a low-client-count cross-silo setting with full client participation. The evaluation covers four task settings: image classification (CIFAR-10), tabular binary classification (body-signal smoking), and two time-series forecasting tasks (network monitoring and household power consumption).
 
-The implementation combines federated training with configurable aggregation, client-side local differential privacy, server-side central differential privacy, centralized baselines, and post-training privacy attacks. The experimental workflow includes dataset preparation, hyperparameter and privacy-parameter sweeps, utility evaluation, and final-model attacks, namely membership inference and targeted reconstruction. Secure Aggregation is treated as a training-time confidentiality mechanism that hides individual client updates from the server during aggregation, whereas Differential Privacy is treated as a statistical privacy mechanism that can influence leakage from the final model.
+The implementation compares three differentially private mechanisms under a single, unified Rényi DP accountant: client-contribution-level **local DP** (each client perturbs its own update), client-contribution-level **central DP** (the server perturbs the aggregate), and record-level **DP-SGD** (per-example gradient clipping plus Gaussian noise inside each client, amplified by minibatch subsampling). **Secure Aggregation** is treated as a complementary training-time confidentiality mechanism that hides individual client updates from the server during aggregation, rather than as a final-model privacy mechanism. All configurations are trained with five random seeds and reported as mean ± standard deviation. Privacy is measured on the released final model through two attacks: membership inference and targeted reconstruction.
 
-The repository is intended to support reproducible experimentation. It contains run scripts, W&B sweep configurations, dataset preparation notebooks, federated and centralized training entry points, model definitions, and attack pipelines that produce tabular attack results. The codebase was optimized for Ubuntu 24 and Python 3.11. Other operating systems may require additional adaptation, especially for shell scripts, process cleanup, TensorFlow installation, and Flower runtime behavior.
+Under the unified accounting, the noise multiplier for a target ε is calibrated at runtime from the accountant (there is no hand-set noise grid). The two client-level mechanisms share the same calibration and differ only in where noise is added, while record-level DP-SGD reaches a given ε at far lower noise because of subsampling amplification.
+
+The repository is intended to support reproducible experimentation. It contains sweep generators, W&B sweep configurations, run scripts, dataset preparation notebooks, the federated training entry points, model and DP definitions, analysis scripts that produce the paper's figures and tables, and attack pipelines that produce tabular attack results.
+
+> **Note:** centralized / non-federated training has been removed. The project is
+> federated-only. Any residual `no_fl` flag or `venv_dp` reference in the scripts
+> is legacy and is not part of the supported workflow.
 
 ## Repository Structure
 
-The expected structure of the project archive is shown below. Some generated directories, such as `saves`, `artifacts`, and attack export folders, may be empty before the first execution.
+Generated directories (`saves`, `artifacts`, `results`, attack export folders) may be empty before the first run. Paths marked `CONFIRM` are best guesses — adjust to your actual layout.
 
 ```text
 .
@@ -30,603 +46,316 @@ The expected structure of the project archive is shown below. Some generated dir
 │   ├── mia_results.csv
 │   └── recon_results.csv
 ├── config
-│   ├── cifar_*.yaml
-│   ├── network_*.yaml
-│   ├── smoking_*.yaml
-│   ├── attack_experiments.yaml
+│   ├── <stem>_fl.yaml                # generated by generate_configs.py
+│   ├── <stem>_fl_dp_central.yaml
+│   ├── <stem>_fl_dp_local.yaml
+│   ├── <stem>_fl_dp_example.yaml
+│   ├── config_redo/                  # optional redo sweeps (failed-run reruns)
+│   ├── attack_experiments.yaml       # generated by generate_attack_configs.py
 │   └── config.py
 ├── data
 │   ├── dataset_loader.py
 │   ├── partition_functions.py
 │   ├── body_signal_of_smoking
-│   │   ├── data_raw.csv
-│   │   └── data.csv
 │   ├── cifar10
-│   └── network_monitoring
+│   ├── network_monitoring
+│   └── household_power
 ├── federation
 │   ├── client
 │   ├── server
 │   ├── model.py
+│   ├── dp_sgd.py                     # manual Keras-3 DP-SGD (record-level)
+│   ├── dp_utils.py                   # unified RDP accounting   (CONFIRM path)
+│   ├── seeding.py                    # multi-seed reproducibility (CONFIRM path)
 │   └── weighted_average.py
 ├── notebooks
 │   ├── body_signal_of_smoking_eda.ipynb
 │   ├── cifar10_eda.ipynb
-│   └── network_monitoring_eda.ipynb
+│   ├── network_monitoring_eda.ipynb
+│   └── household_power_eda.ipynb      # CONFIRM
+├── generate_configs.py               # emits the sweep YAMLs         (CONFIRM path)
+├── generate_attack_configs.py        # selects configs to attack     (CONFIRM path)
+├── fetch_runs.py                     # pulls seeded sweep results CSV (CONFIRM path)
+├── analyze_results.py                # utility figures + tables       (CONFIRM path)
+├── analyze_attacks.py                # attack figures                 (CONFIRM path)
+├── results
+│   └── project.csv                   # seeded sweep export (from fetch_runs.py)
 ├── saves
 ├── artifacts
 ├── run.sh
 ├── run_sweep.sh
 ├── client_app.py
 ├── server_app.py
-├── train_centralized.py
-├── reqs_fl.txt
-├── reqs_centralized.txt
-├── README.md
+├── reqs_fl.txt                       # CONFIRM filename
+└── README.md
 ```
 
 ## Main Components
 
 The implementation is organized around four execution layers.
 
-First, the dataset preparation layer contains notebooks in `notebooks/`. These notebooks should be executed before training so that raw data are transformed into the files expected by the data loader. For the body-signal smoking dataset, the notebook reads `data/body_signal_of_smoking/data_raw.csv`, performs feature engineering, and writes the processed file to `data/body_signal_of_smoking/data.csv`. The CIFAR-10 notebook relies on the TensorFlow/Keras dataset loader and mainly supports inspection, statistics, and sanity checks. The network-monitoring dataset should be prepared analogously before the first network-monitoring experiment.
+**1. Dataset preparation** — notebooks in `notebooks/`. Run them before training so raw data are transformed into the files the loader expects. The smoking notebook reads `data/body_signal_of_smoking/data_raw.csv` and writes `data.csv`; CIFAR-10 loads through TensorFlow/Keras; the two time-series datasets (network monitoring and household power) share the same GRU preprocessing pipeline (hourly resampling, time-based interpolation, 80/20 chronological split, per-feature min–max normalization, length-24 sliding windows, one-step-ahead targets).
 
-Second, the configuration layer consists of YAML files in `config/` and environment-driven runtime configuration in `config/config.py`. Dataset-specific sweep files follow names such as `cifar_fl.yaml`, `cifar_fl_dp_local.yaml`, `smoking_fl_dp_central.yaml`, or `network_centralized.yaml`. The YAML files define W&B grid-search parameters. The Python configuration object then reads command-line values exported by `run.sh` as environment variables.
+**2. Configuration** — `generate_configs.py` emits the W&B sweep YAMLs (four per dataset: plain FL, central DP, local DP, example-level DP-SGD). Runtime behavior is driven by `config/config.py`, which reads the command-line values that `run.sh` exports as environment variables. The Gaussian **noise multiplier is calibrated at runtime** in `config.py` from `(epsilon, M, R, delta)` via the RDP accountant in `dp_utils.py` — there is no `noise_multiplier` grid. The **unit of privacy** is set by `dp_level` (`client` or `example`).
 
-Third, the training layer contains the Flower client and server applications. `client_app.py` attaches Flower client-side modifiers such as Secure Aggregation, fixed clipping, and local differential privacy when requested by the active configuration. `server_app.py` creates the server strategy, wraps it with central differential privacy when required, chooses the regular or SecAgg+ workflow, runs the Flower workflow, and optionally exports the final global model for attack evaluation. Centralized non-federated experiments are executed through `train_centralized.py`.
+**3. Training** — the Flower client and server apps. `client_app.py` attaches Flower client-side modifiers (Secure Aggregation, fixed clipping) and applies client-level local DP inside `client.fit()` when requested. `server_app.py` builds the strategy, wraps it with central DP when `dp_level == client` and `local == false`, chooses the regular or SecAgg+ workflow, runs the Flower workflow, logs the accountant's achieved ε, and optionally exports the final global model for attacks. Record-level DP-SGD lives in `federation/dp_sgd.py` (a manual, Keras-3-native `train_step` with per-example clipping and Gaussian noise — **not** `tensorflow_privacy`) and runs locally inside each client.
 
-Fourth, the attack layer contains two privacy-attack pipelines. `mia_pipeline.py` trains or loads retained models and evaluates them with baseline loss-based and learned logistic-regression membership-inference attacks. `reconstruction_pipeline.py` trains or loads retained models and evaluates targeted reconstruction attacks with baseline and stronger multi-restart optimization variants. The produced CSV files are `attacks/mia_results.csv` and `attacks/recon_results.csv`.
+**4. Attacks** — `attacks/mia_pipeline.py` and `attacks/reconstruction_pipeline.py` train or load retained models and evaluate them with membership-inference (baseline loss-based + learned logistic-regression) and targeted-reconstruction (baseline + multi-restart) attacks under the canary "controlled memorization" regime. `generate_attack_configs.py` selects which sweep configurations are worth attacking and writes `config/attack_experiments.yaml`. `analyze_results.py` and `analyze_attacks.py` produce the utility/runtime tables and figures and the attack figures.
 
 ## Prerequisites
 
-The project was implemented and tested for the following baseline environment:
+- Ubuntu 24, with Bash. `CONFIRM: Python version`
+- A single Python virtual environment `venv` in the project root (used for all Flower federated experiments). The record-level DP-SGD path was developed for Keras 3 in the NVIDIA NGC TensorFlow container — if you run in the container, work inside it instead of `venv`. `CONFIRM`
+- A Weights & Biases account for sweep management and logging.
+- Optional CUDA-compatible GPU. CPU works but image and time-series runs are much slower.
 
-- Ubuntu 24, preferably with Bash available as the command shell.
-- Python 3.11.
-- Two Python virtual environments in the project root: `venv` and `venv_dp`.
-- Weights & Biases account for sweep management and experiment logging.
-- Optional CUDA-compatible GPU. The code can run on CPU, but image and time-series experiments are significantly slower.
+The project uses process-control commands (`pkill`, `flower-superlink`, `flower-client-app`, `flower-server-app`), so Ubuntu is the recommended platform.
 
-The project uses shell scripts and process-control commands such as `pkill`, `flower-superlink`, `flower-client-app`, and `flower-server-app`. For this reason, Ubuntu is the recommended execution platform. Running the same scripts on Windows or macOS can require modification.
-
-## Installation Manual
+## Installation
 
 ### 1. Obtain the project
+Clone the repository or unpack the archive, then enter the project root.
 
-Clone the repository or unpack the submitted archive, then enter the project root.
-
-
-### 2. Install system-level prerequisites
-
-On Ubuntu 24, install Python 3.11 and common build tools if they are not already present.
-
+### 2. System prerequisites (Ubuntu)
 ```bash
 sudo apt update
-sudo apt install python3.11 python3.11-venv python3.11-dev build-essential git
+sudo apt install python3 python3-venv python3-dev build-essential git   # CONFIRM python3.X
 ```
 
 ### 3. Create the federated-learning environment
-
-The main environment is called `venv`. It is used for Flower-based federated experiments, including plain FL, FL with Secure Aggregation, FL with local differential privacy, and FL with central differential privacy.
-
 ```bash
-python3.11 -m venv venv
+python3 -m venv venv                 # CONFIRM interpreter
 source venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-pip install -r reqs_fl.txt
+pip install -r reqs_fl.txt           # CONFIRM filename
 ```
-
-If the Flower fork is stored locally rather than installed from the editable Git entry in `reqs_fl.txt`, install it manually from the local directory:
-
+If the Flower fork is stored locally rather than installed from the editable Git entry in `reqs_fl.txt`, install it from the local directory:
 ```bash
 pip install -e /path/to/local/flower
-```
-
-Then deactivate the environment:
-
-```bash
 deactivate
 ```
 
-### 4. Create the centralized/DP environment
-
-The second environment is called `venv_dp`. It is used mainly for centralized training and centralized DP training. In the supplied files, the requirements file is named `reqs_centralized.txt`. 
-
+### 4. Make scripts executable
 ```bash
-python3.11 -m venv venv_dp
-source venv_dp/bin/activate
-python -m pip install --upgrade pip setuptools wheel
-pip install -r reqs_centralized.txt
+chmod +x run.sh run_sweep.sh
 ```
 
-Then deactivate the environment:
-
-```bash
-deactivate
-```
-
-### 5. Make scripts executable
-
-```bash
-chmod +x run.sh
-chmod +x run_sweep.sh
-```
-
-### 6. Configure Weights & Biases
-
-Log in to W&B from at least one environment. If W&B is not available in the second environment, repeat the login there as well.
-
+### 5. Configure Weights & Biases
 ```bash
 source venv/bin/activate
 wandb login
 deactivate
-
-source venv_dp/bin/activate
-wandb login
-deactivate
 ```
-
-The current implementation contains two project-name conventions. Several scripts currently log to `diplom_dp_fl`, while the example sweep YAML uses `privacy_preserving_federated_learning`. For clean reproducibility, choose one name and use it consistently in:
-
-- `run_sweep.sh`, variable `PROJECT_NAME`;
-- `server_app.py`, the `wandb.init(...)` call;
-- `train_centralized.py`, the `wandb.init(...)` call;
-- the `project` field in all W&B sweep YAML files.
-
-A recommended stable choice for the thesis archive is:
-
-```text
-privacy_preserving_federated_learning
-```
+The project name is now consistent across the codebase: `run_sweep.sh` (`PROJECT_NAME`), `server_app.py` (`wandb.init`), and every generated sweep YAML use `privacy_preserving_federated_learning`. Keep new files consistent with this name.
 
 ## Dataset Preparation
 
-Dataset preparation must be completed before running the training scripts.
+Complete dataset preparation before training.
 
 ### Body Signal of Smoking
-
-1. FInd the raw CSV file at:
-
-```text
-data/body_signal_of_smoking/data_raw.csv
-```
-
-If it is abscent or damaged, you can find it in the origin [here](https://www.kaggle.com/datasets/kukuroo3/body-signal-of-smoking)
-
-2. Start Jupyter from the federated-learning environment:
-
-```bash
-source venv/bin/activate
-jupyter lab
-```
-
-3. Open and run:
-
-```text
-notebooks/body_signal_of_smoking_eda.ipynb
-```
-
-4. Confirm that the processed dataset was created:
-
-```text
-data/body_signal_of_smoking/data.csv
-```
-
-The notebook performs basic inspection, feature engineering, and exports the processed dataset used by the training pipeline.
+1. Find the raw CSV at `data/body_signal_of_smoking/data_raw.csv`. If it is missing, download it from the [source](https://www.kaggle.com/datasets/kukuroo3/body-signal-of-smoking).
+2. `source venv/bin/activate && jupyter lab`
+3. Run `notebooks/body_signal_of_smoking_eda.ipynb`.
+4. Confirm `data/body_signal_of_smoking/data.csv` was created.
 
 ### CIFAR-10
-
-CIFAR-10 is loaded through TensorFlow/Keras. The notebook is used mainly for exploratory analysis and dataset sanity checks.
-
+Loaded through TensorFlow/Keras; the notebook is for inspection only. The first training run downloads CIFAR-10 automatically if not cached.
 ```bash
 source venv/bin/activate
 jupyter lab notebooks/cifar10_eda.ipynb
 ```
 
-The first training run may download CIFAR-10 automatically if it is not already cached by TensorFlow/Keras.
-
-### Network Monitoring
-
-Prepare the network-monitoring dataset before running any `network_*` configuration. The expected workflow is the same as for the smoking dataset: place the raw data under `data/network_monitoring/`, run the corresponding notebook in `notebooks/`, and verify that the processed files expected by `data/dataset_loader.py` exist.
+### Network Monitoring and Household Power
+Both are GRU time-series tasks with the same preprocessing. Place the raw data under `data/network_monitoring/` and `data/household_power/`, run the corresponding notebooks in `notebooks/`, and verify the processed files expected by `data/dataset_loader.py`. Household power is the UCI Individual Household Electric Power Consumption dataset (DOI 10.24432/C58K54).
 
 ## Configuration Guide
 
-### Runtime configuration
-
-`run.sh` accepts command-line parameters and exports them as environment variables. The main supported parameters are:
+### Runtime parameters (`run.sh`)
+`run.sh` parses these flags and exports them as environment variables read by `config/config.py`:
 
 ```text
+dataset            body_signal_of_smoking | cifar10 | network_monitoring | household_power
 aggregation_type   regular | secure
-partition_type     iid | noniid | vertical | centralized
-dp                 true | false
-local              true | false
-clipping           server | client
-l2_norm_clip       numeric clipping norm
-noise_multiplier   numeric Gaussian noise multiplier for central DP
-epsilon            total epsilon used by local DP logic
-delta              total delta used by local DP logic
+partition_type     iid | noniid | vertical
+n_clients          number of federated clients (3 | 6 | 10 in the sweeps)
+epochs             number of FL rounds
+batch_size         local batch size
 learning_rate      optimizer learning rate
-batch_size         local or centralized batch size
-epochs             number of centralized epochs or FL rounds
-no_fl              true for centralized training, false for FL
-n_clients          number of federated clients
-dataset            body_signal_of_smoking | cifar10 | network_monitoring
+seed               reproducibility seed (multi-seed protocol uses 0..4)
+dp                 true | false
+dp_level           client | example        (unset => client)
+local              true | false            (client-level: local vs central DP)
+clipping           server | client         (central DP placement)
+l2_norm_clip       clipping norm (per-round update at client level; per-example gradient at example level)
+epsilon            target privacy budget (noise multiplier is calibrated from this)
+noise_multiplier   optional; for central DP only, else calibrated from epsilon at runtime
+delta              optional; defaults to 1/(10*M) at client level, 1/(10*n) at example level
+example_vectorized true | false            (example-level pfor fast path; false for GRU datasets)
 ```
 
-The Python configuration object also defines default values. If a parameter is omitted from the command, the default in `config/config.py` is used.
+Notes:
+- `dp_level=client` (default) protects a whole client contribution at full participation (`q=1`); noise is calibrated with `q=1` (no amplification). `dp_level=example` runs record-level DP-SGD locally with `q = batch / n_examples_per_client` (subsampling amplification), so its `z` is much smaller at the same ε.
+- `delta` and (for LDP/DP-SGD) the noise multiplier are computed automatically; you normally pass only `epsilon` and `l2_norm_clip`.
+- `example_vectorized` must be `false` for the GRU datasets (`network_monitoring`, `household_power`): `tf.vectorized_map`/pfor cannot convert the GRU's internal ops. It defaults to the true (fast) path for the CNN and MLP.
 
-### Sweep configuration files
-
-Sweep files are stored in `config/`. A typical sweep file has this form:
+### Generating sweep YAMLs
+Do not hand-edit sweep files; regenerate them:
+```bash
+python generate_configs.py            # CONFIRM path -> writes config/<stem>_{fl,fl_dp_central,fl_dp_local,fl_dp_example}.yaml
+```
+The generator's axes (single source of truth): `EPSILONS = [1, 3, 10, 30, 100, 300]` (targets; the accountant logs the achieved ε for the calibrated `z`), `SEEDS = [0,1,2,3,4]`, `N_CLIENTS = [3,6,10]`, clip grid `{1,5}`. A typical generated sweep:
 
 ```yaml
 program: run.sh
 project: privacy_preserving_federated_learning
 method: grid
-
 parameters:
-  dataset:
-    value: "cifar10"
-  aggregation_type:
-    value: "regular"
-  dp:
-    value: False
-  n_clients:
-    values: [3, 6, 10]
-  partition_type:
-    value: "iid"
-  learning_rate:
-    value: 0.0005
-  batch_size:
-    value: 16
-  epochs:
-    value: 50
-  l2_norm_clip:
-    values: [1, 5]
-
-command:
-  - ${env}
-  - bash
-  - ${program}
-  - ${args}
+  dataset:        { value: "cifar10" }
+  aggregation_type: { value: "regular" }
+  dp:             { value: True }
+  dp_level:       { value: "client" }
+  local:          { value: False }        # central DP
+  clipping:       { value: "server" }
+  epsilon:        { values: [1, 3, 10, 30, 100, 300] }
+  l2_norm_clip:   { values: [1, 5] }
+  n_clients:      { values: [3, 6, 10] }
+  seed:           { values: [0, 1, 2, 3, 4] }
+  learning_rate:  { value: 0.0005 }
+  batch_size:     { value: 16 }
+  epochs:         { value: 50 }
+command: [ "${env}", "bash", "${program}", "${args}" ]
 ```
 
-Single values create fixed settings. Lists under `values` create grid-search dimensions. Therefore, increasing the number of values in a YAML file directly increases the number of training runs in the corresponding sweep.
-
-### Attack configuration file
-
-`config/attack_experiments.yaml` is used to define the retained configurations for privacy attacks. It contains a `defaults` section and one section per experiment. Scalar values are fixed. List values are expanded as a grid.
-
-Important fields include:
-
-```text
-dataset             dataset to use for the experiment
-no_fl               true for centralized training, false or omitted for FL
-dp                  enables or disables DP
-local               true for local DP, false for central DP
-clipping            clipping location for central DP
-noise_multiplier    central-DP noise multiplier
-epsilon             local-DP epsilon
-l2_norm_clip        clipping norm
-n_clients           client-count grid
-leaky_train_frac    fraction of training data retained in the leaky setting
-canary_frac         fraction of canary samples
-canary_dups         number of canary duplicates
-canary_flip         whether canary labels are flipped
-epochs              number of epochs or FL rounds
-batch_size          batch size
-learning_rate       learning rate
-```
-
-Because the attack pipelines have older default config names in their argument parsers, pass the attack config explicitly when running them:
-
-```bash
-python ./attacks/mia_pipeline.py --config config/attack_experiments.yaml --verbose
-python ./attacks/reconstruction_pipeline.py --config config/attack_experiments.yaml --verbose
-```
+### Attack configuration
+`config/attack_experiments.yaml` is generated by `generate_attack_configs.py` from the seeded sweep results (`results/project.csv`, produced by `fetch_runs.py`). It selects, per dataset, a plain (no-DP) baseline plus the usable operating point(s) for each DP mechanism, each in two variants — `*_canary` (leaky subsample + canaries) and `*_full` (full-train members). Pass the config explicitly when running the pipelines.
 
 ## Running a Single Experiment
 
-For a single manual run, activate the correct environment first, then call `run.sh` from the project root.
+Activate `venv`, then call `run.sh` from the project root.
 
 ### Plain federated CIFAR-10
-
 ```bash
 source venv/bin/activate
-./run.sh \
-  --dataset=cifar10 \
-  --aggregation_type=regular \
-  --partition_type=iid \
-  --n_clients=3 \
-  --dp=false \
-  --learning_rate=0.0005 \
-  --batch_size=16 \
-  --epochs=50
+./run.sh --dataset=cifar10 --aggregation_type=regular --partition_type=iid \
+  --n_clients=3 --dp=false --seed=0 \
+  --learning_rate=0.0005 --batch_size=16 --epochs=50
 deactivate
 ```
 
 ### Federated CIFAR-10 with Secure Aggregation
-
 ```bash
-source venv/bin/activate
-./run.sh \
-  --dataset=cifar10 \
-  --aggregation_type=secure \
-  --partition_type=iid \
-  --n_clients=3 \
-  --dp=false \
-  --learning_rate=0.0005 \
-  --batch_size=16 \
-  --epochs=50
-deactivate
+./run.sh --dataset=cifar10 --aggregation_type=secure --partition_type=iid \
+  --n_clients=3 --dp=false --seed=0 \
+  --learning_rate=0.0005 --batch_size=16 --epochs=50
 ```
 
-### Federated CIFAR-10 with central DP
-
+### Client-level central DP (noise calibrated from ε)
 ```bash
-source venv/bin/activate
-./run.sh \
-  --dataset=cifar10 \
-  --aggregation_type=regular \
-  --partition_type=iid \
-  --n_clients=3 \
-  --dp=true \
-  --local=false \
-  --clipping=server \
-  --noise_multiplier=0.6070 \
-  --l2_norm_clip=1 \
-  --learning_rate=0.0005 \
-  --batch_size=16 \
-  --epochs=50
-deactivate
+./run.sh --dataset=cifar10 --aggregation_type=regular --partition_type=iid \
+  --n_clients=3 --dp=true --dp_level=client --local=false --clipping=server \
+  --epsilon=100 --l2_norm_clip=1 --seed=0 \
+  --learning_rate=0.0005 --batch_size=16 --epochs=50
 ```
 
-### Federated CIFAR-10 with local DP
-
+### Client-level local DP
 ```bash
-source venv/bin/activate
-./run.sh \
-  --dataset=cifar10 \
-  --aggregation_type=regular \
-  --partition_type=iid \
-  --n_clients=3 \
-  --dp=true \
-  --local=true \
-  --epsilon=5.0 \
-  --delta=1e-5 \
-  --l2_norm_clip=1 \
-  --learning_rate=0.0005 \
-  --batch_size=16 \
-  --epochs=50
-deactivate
+./run.sh --dataset=cifar10 --aggregation_type=regular --partition_type=iid \
+  --n_clients=3 --dp=true --dp_level=client --local=true \
+  --epsilon=100 --l2_norm_clip=1 --seed=0 \
+  --learning_rate=0.0005 --batch_size=16 --epochs=50
 ```
 
-### Centralized CIFAR-10 baseline
-
-Centralized runs should be executed from `venv_dp`.
-
+### Record-level DP-SGD (example level, local only)
 ```bash
-source venv_dp/bin/activate
-./run.sh \
-  --dataset=cifar10 \
-  --no_fl=true \
-  --dp=false \
-  --learning_rate=0.001 \
-  --batch_size=16 \
-  --epochs=50
-deactivate
+./run.sh --dataset=cifar10 --aggregation_type=regular --partition_type=iid \
+  --n_clients=3 --dp=true --dp_level=example \
+  --epsilon=10 --l2_norm_clip=1 --example_vectorized=true --seed=0 \
+  --learning_rate=0.0005 --batch_size=16 --epochs=50
 ```
-
-### Centralized CIFAR-10 with DP-SGD
-
-```bash
-source venv_dp/bin/activate
-./run.sh \
-  --dataset=cifar10 \
-  --no_fl=true \
-  --dp=true \
-  --noise_multiplier=0.6070 \
-  --l2_norm_clip=1 \
-  --learning_rate=0.001 \
-  --batch_size=16 \
-  --epochs=50
-deactivate
-```
+For the GRU datasets, add `--example_vectorized=false`.
 
 ## Running Sweep Experiments
 
-Sweeps are controlled through `run_sweep.sh`. Each uncommented `run_sweep "..."` line creates a W&B sweep from `config/<sweep_name>.yaml` and then launches a W&B agent for that sweep.
-
-1. Open `run_sweep.sh`.
-2. Uncomment only the sweep rows that should be executed.
-3. Verify the corresponding YAML files in `config/`.
-4. Make sure W&B is logged in.
-5. Deactivate any active virtual environment.
-6. Run the sweep script from the project root.
-
+1. Generate the sweep YAMLs: `python generate_configs.py`.
+2. Open `run_sweep.sh` and uncomment only the `run_sweep "..."` lines to execute.
+3. Ensure W&B is logged in.
+4. Run from the project root with no active virtual environment:
 ```bash
 deactivate 2>/dev/null || true
 ./run_sweep.sh
 ```
+`run_sweep.sh` creates a W&B sweep from `config/<sweep_name>.yaml` and launches an agent, sequentially. Reruns of failed runs live in `config/config_redo/` (generated separately) and are launched by passing that directory as the second argument, e.g. `run_sweep "cifar_fl_dp_central" "config/config_redo"`.
 
-The script selects the virtual environment based on the sweep name. Centralized sweeps and sweeps ending in `_dp` are executed in `venv_dp`; the other sweeps are executed in `venv`. Review this logic if new sweep names are added.
-
-The sweep script runs sweeps sequentially. It is therefore suitable for reproducible batch experiments, but it can take a long time for large grids or image experiments.
+> The `activate_venv` helper still contains a legacy `venv_dp` branch for
+> `*_centralized*`/`*dp` sweep names. With centralized removed, all current
+> sweeps run in `venv`; the branch is dead and can be pruned.
 
 ## Running Privacy-Attack Experiments
 
-The attack pipelines should be stored in the `attacks/` directory because they assume paths relative to that directory and call `../run.sh` internally.
+Before running attacks: both datasets prepared, `config/attack_experiments.yaml` present (regenerate with `generate_attack_configs.py`), no stray Flower processes, and the launching interpreter has `PyYAML` (running from `venv` satisfies this). The pipelines live in `attacks/` and call `../run.sh` internally.
 
-Before running attacks, ensure that:
-
-- both virtual environments have been created;
-- datasets have been prepared;
-- `config/attack_experiments.yaml` contains the retained configurations to evaluate;
-- no unrelated Flower processes are running;
-- the Python interpreter used to start the pipeline has `PyYAML` installed, because the pipeline reads YAML before it activates the experiment-specific virtual environment.
-
-A safe setup is to start the attack pipeline from `venv`, because `reqs_fl.txt` already includes `PyYAML`.
-
-### Membership inference pipeline
-
+### Membership inference
 ```bash
 source venv/bin/activate
 python ./attacks/mia_pipeline.py --config config/attack_experiments.yaml --verbose
 deactivate
 ```
+Exports models to `attacks/exports_mia/` and writes `attacks/mia_results.csv` (config, model path, baseline + learned metrics, status). Canary-regime knobs: `--stress-alpha`, `--stress-beta` (default 0.01), `--stress-k` (default 5), `--stress-seed` (default 42).
 
-This pipeline exports trained models to:
-
-```text
-attacks/exports_mia/
-```
-
-and writes the result table to:
-
-```text
-attacks/mia_results.csv
-```
-
-The CSV contains the experiment configuration, exported model path, baseline attack metrics, learned attack metrics, status, and error message if a run failed.
-
-### Reconstruction pipeline
-
+### Targeted reconstruction
 ```bash
 source venv/bin/activate
 python ./attacks/reconstruction_pipeline.py --config config/attack_experiments.yaml --verbose
 deactivate
 ```
+Exports models to `attacks/exports_recon/` and writes `attacks/recon_results.csv`. Useful flags: `--num-targets` (default 10), `--targets-seed` (42), `--target-split {train,test}`, `--targets` (explicit indices), `--attack-saved` with `--exports-dir` to attack already-exported models, plus the same `--stress-*` knobs.
 
-This pipeline exports trained models to:
-
-```text
-attacks/exports_recon/
-```
-
-and writes the result table to:
-
-```text
-attacks/recon_results.csv
-```
-
-By default, the reconstruction pipeline evaluates multiple sampled target records. The most relevant command-line arguments are:
-
-```text
---num-targets       number of target records to evaluate
---targets-seed      seed for target selection
---target-split      train or test
---targets           comma-separated explicit target indices
---attack-saved      attack already exported models instead of training new ones
---exports-dir       directory containing exported .keras models
-```
-
-Example for attacking already exported reconstruction models:
-
+Example, attacking already-exported reconstruction models:
 ```bash
-source venv/bin/activate
-python ./attacks/reconstruction_pipeline.py \
-  --attack-saved \
-  --exports-dir ./attacks/exports_recon \
-  --dataset cifar10 \
-  --num-targets 10 \
-  --target-split train \
-  --verbose
-deactivate
+python ./attacks/reconstruction_pipeline.py --attack-saved \
+  --exports-dir ./attacks/exports_recon --dataset cifar10 \
+  --num-targets 10 --target-split train --verbose
 ```
 
 ## Results and Visualization
 
-Each standard federated execution produces artifacts in `saves/`. File names include the dataset, aggregation type, partition type, client count, number of rounds, and timestamp.
+Each federated run writes artifacts to `saves/` (names encode dataset, aggregation, partition, client count, rounds, timestamp): `*.history.pkl`, `*.weights.h5`, `*.lclmetrics.csv`, `server_log.txt`. Exported `.keras` models for attacks land in `artifacts/` or the attack export folders. Attack results are `attacks/mia_results.csv` and `attacks/recon_results.csv`.
 
-Typical saved artifacts include:
-
-```text
-*.history.pkl       global training history
-*.weights.h5        model weights
-*.lclmetrics.csv    client-side metrics
-server_log.txt      console log captured from the server app
+The paper's figures and tables are produced by the analysis scripts:
+```bash
+python analyze_results.py             # utility, runtime, and DP-scaling figures/tables
+python analyze_attacks.py             # membership-inference and reconstruction figures
 ```
-
-When model export is enabled for attack experiments, final `.keras` models are stored either in `artifacts/` or in the attack export directories, depending on the execution mode.
-
-Attack result files are:
-
-```text
-attacks/mia_results.csv
-attacks/recon_results.csv
-```
-
-These CSV files can be loaded into a notebook or spreadsheet for analysis. The existing `visualization.ipynb` can be used to inspect training curves, W&B metrics, and retained configurations.
 
 ## Reproducibility Checklist
 
-For a clean reproduction of the thesis experiments, complete the following sequence:
+1. Ubuntu 24 and your confirmed Python/runtime.
+2. Unpack the archive or clone the repository.
+3. Create `venv` from `reqs_fl.txt`; install the Flower fork.
+4. Run the dataset-preparation notebooks and verify processed files under `data/` (all four datasets).
+5. Keep the W&B project name `privacy_preserving_federated_learning` everywhere.
+6. `python generate_configs.py` to (re)generate the sweep YAMLs.
+7. Edit `run_sweep.sh`, uncomment the target sweeps, and run `./run_sweep.sh` with no active venv.
+8. Pull seeded results with `fetch_runs.py` into `results/project.csv`.
+9. `python generate_attack_configs.py` to select configs and write `config/attack_experiments.yaml`.
+10. Run the MIA and reconstruction pipelines with the explicit `--config`.
+11. `python analyze_results.py` and `python analyze_attacks.py` for figures/tables.
+12. Archive `saves/`, `artifacts/`, `attacks/exports_*`, the result CSVs, `results/project.csv`, W&B run links, and the exact YAMLs used.
 
-1. Use Ubuntu 24 and Python 3.11.
-2. Unpack the project archive or clone the repository.
-3. Create `venv` from `reqs_fl.txt`.
-4. Create `venv_dp` from `reqs_centralizedp.txt` or the equivalent centralized requirements file in the archive.
-5. Install the required Flower fork either from the editable requirement or from a local clone.
-6. Run the dataset preparation notebooks in `notebooks/`.
-7. Verify the processed files under `data/`.
-8. Choose one W&B project name and make it consistent across shell scripts, Python scripts, and YAML files.
-9. Review each sweep YAML file and adjust only the parameters that should be part of the grid.
-10. Edit `run_sweep.sh` and uncomment the target sweeps.
-11. Run `./run_sweep.sh` from the project root with no active virtual environment.
-12. Select retained models and configurations for attack evaluation.
-13. Review `config/attack_experiments.yaml`.
-14. Run the MIA and reconstruction pipelines with the explicit config argument.
-15. Archive `saves/`, `artifacts/`, `attacks/exports_mia/`, `attacks/exports_recon/`, `attacks/mia_results.csv`, `attacks/recon_results.csv`, W&B run links, and the exact YAML files used.
+## Troubleshooting
 
-## Troubleshooting Notes
+**W&B logs appear in the wrong project.** Confirm `PROJECT_NAME` in `run_sweep.sh`, the `wandb.init` project in `server_app.py`, and the `project` field in the generated YAMLs all read `privacy_preserving_federated_learning`.
 
-### W&B logs appear in the wrong project
+**The attack pipeline cannot find `../run.sh`.** The pipelines must run from inside `attacks/`; if moved, adjust their relative paths.
 
-Check all project-name definitions. In the current implementation, `run_sweep.sh`, `server_app.py`, `train_centralized.py`, and sweep YAML files may not all use the same project name.
+**The attack pipeline fails before activating an environment.** Install `PyYAML` in the launching interpreter, or run from `venv` (`pip install PyYAML`).
 
-### The attack pipeline cannot find `../run.sh`
+**Secure aggregation fails with few clients.** The number of shares derives from the client count with a minimum of three, so SecAgg is most reliable with at least three clients.
 
-The attack pipeline is expected to be inside the `attacks/` directory. If it is moved to the project root, relative paths inside the pipeline must be adjusted.
+**Example-level DP-SGD dies on the first batch (GRU datasets).** Set `--example_vectorized=false` for `network_monitoring` and `household_power`; pfor cannot vectorize the GRU's internal loop, so those datasets use the sequential `map_fn` path.
 
-### The attack pipeline fails before activating a virtual environment
-
-Install `PyYAML` in the interpreter used to launch the pipeline or run the pipeline from `venv`.
-
-```bash
-source venv/bin/activate
-python -m pip install PyYAML
-```
-
-### A sweep uses the wrong virtual environment
-
-Review the `activate_venv` function in `run_sweep.sh`. It chooses environments from the sweep name. New naming conventions may require updating that function.
-
-### Secure aggregation fails with a small number of clients
-
-The configuration derives the number of shares from the number of clients, with a minimum of three shares. Secure aggregation is therefore most reliable in experiments with at least three clients.
-
-### Centralized DP fails with a microbatch error
-
-For DP-SGD, `batch_size` must be divisible by `num_microbatches`. In this implementation, `num_microbatches` defaults to `1`, but the condition should still be checked if this value is changed.
-
-### TensorFlow/Keras version conflicts occur
-
-Keep the two-environment separation. The Flower environment uses the packages from `reqs_fl.txt`, while the centralized DP environment uses the packages from `reqs_centralizedp.txt`. Mixing these environments can cause TensorFlow, Keras, or TensorFlow Privacy incompatibilities.
+**Noise cannot be calibrated to a target ε.** The runtime calibration in `config.py` requires the `dp_accounting` package. Ensure it is installed in the active environment.
 
 ## Notes for the Submitted Archive
 
-For reproducibility, the submitted ZIP archive should include the following items:
-
-```text
-source code
-configuration YAML files
-requirements files
-dataset preparation notebooks
-processed datasets or clear raw-data acquisition instructions
-run scripts
-attack scripts
-visualization notebook
-README and technical documentation
-selected result CSV files
-```
-
-Large generated artifacts such as model exports, W&B cache files, and raw datasets may be excluded only if their regeneration procedure is documented clearly and the required external inputs are available.
+Include: source code; generated configuration YAMLs and the generators; requirements file; dataset-preparation notebooks; processed datasets or clear raw-data acquisition instructions; run scripts; attack scripts; analysis scripts; README; and the selected result CSVs. Large generated artifacts (model exports, W&B cache, raw datasets) may be excluded only if their regeneration procedure and required inputs are documented.
