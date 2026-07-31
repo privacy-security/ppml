@@ -2,15 +2,6 @@
 
 ![Privacy Enhanced Federated Architecture](./assets/FL_Framework.png)
 
-> **Confirm for your setup before publishing.** A few operational details can't be
-> read from the scripts alone; the placeholders below are marked `CONFIRM`:
-> - Python version / runtime. The scripts use a single `venv`; the record-level
->   DP-SGD path (Keras 3) was developed in the NVIDIA NGC TensorFlow container.
->   State the actual interpreter you ship with. `CONFIRM: Python version + venv vs. NGC container`
-> - Requirements filename(s). This README assumes `reqs_fl.txt`. `CONFIRM: exact filename`
-> - On-disk location of `dp_utils.py`, `seeding.py`, `analyze_results.py`,
->   `analyze_attacks.py`, `generate_configs.py`, `generate_attack_configs.py`,
->   `fetch_runs.py`. The tree below places them at plausible paths marked `CONFIRM`.
 
 ## Abstract
 
@@ -28,7 +19,7 @@ The repository is intended to support reproducible experimentation. It contains 
 
 ## Repository Structure
 
-Generated directories (`saves`, `artifacts`, `results`, attack export folders) may be empty before the first run. Paths marked `CONFIRM` are best guesses — adjust to your actual layout.
+Generated directories (`saves`, `artifacts`, `results`, attack export folders) may be empty before the first run.
 
 ```text
 .
@@ -65,19 +56,19 @@ Generated directories (`saves`, `artifacts`, `results`, attack export folders) m
 │   ├── server
 │   ├── model.py
 │   ├── dp_sgd.py                     # manual Keras-3 DP-SGD (record-level)
-│   ├── dp_utils.py                   # unified RDP accounting   (CONFIRM path)
-│   ├── seeding.py                    # multi-seed reproducibility (CONFIRM path)
+│   ├── dp_utils.py                   # unified RDP accounting   
+│   ├── seeding.py                    # multi-seed reproducibility 
 │   └── weighted_average.py
 ├── notebooks
 │   ├── body_signal_of_smoking_eda.ipynb
 │   ├── cifar10_eda.ipynb
 │   ├── network_monitoring_eda.ipynb
 │   └── household_power_eda.ipynb      # CONFIRM
-├── generate_configs.py               # emits the sweep YAMLs         (CONFIRM path)
-├── generate_attack_configs.py        # selects configs to attack     (CONFIRM path)
-├── fetch_runs.py                     # pulls seeded sweep results CSV (CONFIRM path)
-├── analyze_results.py                # utility figures + tables       (CONFIRM path)
-├── analyze_attacks.py                # attack figures                 (CONFIRM path)
+├── generate_configs.py               # emits the sweep YAMLs         
+├── generate_attack_configs.py        # selects configs to attack     
+├── fetch_runs.py                     # pulls seeded sweep results CSV 
+├── analyze_results.py                # utility figures + tables       
+├── analyze_attacks.py                # attack figures                 
 ├── results
 │   └── project.csv                   # seeded sweep export (from fetch_runs.py)
 ├── saves
@@ -86,7 +77,7 @@ Generated directories (`saves`, `artifacts`, `results`, attack export folders) m
 ├── run_sweep.sh
 ├── client_app.py
 ├── server_app.py
-├── reqs_fl.txt                       # CONFIRM filename
+├── reqs_fl.txt                       
 └── README.md
 ```
 
@@ -105,7 +96,7 @@ The implementation is organized around four execution layers.
 ## Prerequisites
 
 - Ubuntu 24, with Bash. `CONFIRM: Python version`
-- A single Python virtual environment `venv` in the project root (used for all Flower federated experiments). The record-level DP-SGD path was developed for Keras 3 in the NVIDIA NGC TensorFlow container — if you run in the container, work inside it instead of `venv`. `CONFIRM`
+- A single Python virtual environment `venv` in the project root (used for all Flower federated experiments). The record-level DP-SGD path was developed for Keras 3 in the NVIDIA NGC TensorFlow container — if you run in the container, work inside it instead of `venv`. 
 - A Weights & Biases account for sweep management and logging.
 - Optional CUDA-compatible GPU. CPU works but image and time-series runs are much slower.
 
@@ -119,15 +110,15 @@ Clone the repository or unpack the archive, then enter the project root.
 ### 2. System prerequisites (Ubuntu)
 ```bash
 sudo apt update
-sudo apt install python3 python3-venv python3-dev build-essential git   # CONFIRM python3.X
+sudo apt install python3 python3-venv python3-dev build-essential git   
 ```
 
 ### 3. Create the federated-learning environment
 ```bash
-python3 -m venv venv                 # CONFIRM interpreter
+python3 -m venv venv                 
 source venv/bin/activate
 python -m pip install --upgrade pip setuptools wheel
-pip install -r reqs_fl.txt           # CONFIRM filename
+pip install -r reqs_fl.txt          
 ```
 If the Flower fork is stored locally rather than installed from the editable Git entry in `reqs_fl.txt`, install it from the local directory:
 ```bash
