@@ -6,15 +6,12 @@ parameters:
   dataset:
     value: "network_monitoring"
   aggregation_type:
-    # values: ["regular", "secure"]
     value: "regular"
   dp:
     value: False
   n_clients:
     values: [3, 6, 10]
-    # value: 2
   partition_type:
-    # values: ["iid", "noniid"]
     value: "iid"
   learning_rate:
     value: 0.01
@@ -23,8 +20,9 @@ parameters:
   epochs:
     value: 30
   l2_norm_clip:
-    values: [1, 5]
-    # value: 5
+    value: 5
+  seed:
+    values: [0, 1, 2, 3, 4]
 
 command:
   - ${env}

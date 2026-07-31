@@ -21,7 +21,7 @@ def evaluate_with_metrics(model, x, y):
     Runs model.evaluate safely and returns a clean dict of metrics.
     Uses model.metrics_names, which is more stable than iterating model.metrics.
     """
-    raw = model.evaluate(x, y, verbose=0)
+    raw = model.evaluate(x, y, verbose=0, return_dict=True)
 
     # Keras may return dict directly
     if isinstance(raw, dict):
@@ -35,14 +35,12 @@ def evaluate_with_metrics(model, x, y):
     names = list(model.metrics_names)
 
     # Fallback if names are missing/misaligned
-    if len(names) != len(raw):
-        metrics = {"loss": float(raw[0])}
-        for i, value in enumerate(raw[1:], start=1):
-            metrics[f"metric_{i}"] = float(value)
-        return metrics
-
-    return {name: float(value) for name, value in zip(names, raw)}
-
+    if len(names) == len(raw):
+        return {name: float(v) for name, v in zip(names, raw)}
+    out = {"loss": float(raw[0])}
+    for i, v in enumerate(raw[1:], start=1):
+        out[f"metric_{i}"] = float(v)
+    return out
 
 # ================================================================
 # Manual binary metrics (Smoking dataset)
@@ -117,7 +115,7 @@ def get_evaluate_fn(testset, model_name=ExpConfig.MODEL_NAME):
         server_metrics = dict(metrics)
 
         # ---- Network Monitoring ----
-        if dataset == "network_monitoring":
+        if dataset in ["network_monitoring", "household_power"]:
             log_server_eval_to_wandb(server_round, server_metrics)
 
             print("\n[DEBUG SERVER-EVAL] evaluate() returning:")

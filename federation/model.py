@@ -7,6 +7,22 @@ from tensorflow import keras
 from tensorflow.keras import layers, Model
 from tensorflow.keras.optimizers import Adam
 
+from federation.dp_sgd import make_dp_sgd_model
+
+
+def _construct(inputs, outputs, model_name, loss_id, example_dp):
+    """Plain Model, or a DPSGDModel when example-level DP is active."""
+    if example_dp is not None:
+        return make_dp_sgd_model(
+            inputs, outputs, name=model_name,
+            l2_norm_clip=example_dp["l2_norm_clip"],
+            noise_multiplier=example_dp["noise_multiplier"],
+            loss_fn=loss_id,
+            seed_base=example_dp["seed_base"],
+            use_vectorized=example_dp.get("use_vectorized", True),
+        )
+    return Model(inputs, outputs, name=model_name)
+
 
 logger = logging.getLogger(__name__)
 
@@ -46,62 +62,19 @@ def make_optimizer(
     num_microbatches: int = 1,
 ):
     """
-    Return either a DP Keras optimizer (from tensorflow-privacy)
-    or a standard Adam optimizer.
+    Always returns a standard Adam optimizer.
 
-    Logs exactly which optimizer is used and why.
+    NOTE: DP is no longer implemented via a DP optimizer. Client-level DP adds
+    noise to the update after training; example-level DP is DP-SGD implemented in
+    DPSGDModel.train_step. tensorflow_privacy's DP optimizers depend on
+    keras.optimizers.legacy, which Keras 3 removed, so they are not used.
+    The dp/no_fl/clip/noise args are accepted for signature compatibility.
     """
-
     logger.info(
-        "[OPTIMIZER] Requested optimizer config: "
-        f"dp={dp}, no_fl={no_fl}, "
-        f"lr={learning_rate}, "
-        f"l2_clip={l2_norm_clip}, "
-        f"noise={noise_multiplier}, "
-        f"microbatches={num_microbatches}"
+        f"[OPTIMIZER] Adam (lr={learning_rate}); DP handled outside the optimizer "
+        f"(dp={dp}, no_fl={no_fl})."
     )
-
-    if dp and no_fl:
-        import tensorflow_privacy as tf_privacy
-        # dp==True and no fl-> build DPKerasAdamOptimizer (TF-Privacy)
-
-        # default clip & noise if None (you can override from config)
-        if l2_norm_clip is None:
-            l2_norm_clip = 1.0
-        if noise_multiplier is None:
-            noise_multiplier = 1.0
-        if num_microbatches is None:
-            num_microbatches = 1
-
-        # instantiate DP optimizer
-        opt = tf_privacy.DPKerasAdamOptimizer(
-            l2_norm_clip=l2_norm_clip,
-            noise_multiplier=noise_multiplier,
-            num_microbatches=num_microbatches,
-            learning_rate=learning_rate,
-        )
-
-        logger.warning(
-            "[OPTIMIZER] USING DP OPTIMIZER: DPKerasAdamOptimizer | "
-            f"l2_clip={l2_norm_clip}, "
-            f"noise={noise_multiplier}, "
-            f"microbatches={num_microbatches}"
-        )
-
-        return opt
-
-    # --------------------------------------------------
-    # Standard (non-DP) optimizer
-    # --------------------------------------------------
-    opt = Adam(learning_rate)
-
-    logger.warning(
-        "[OPTIMIZER] USING NON-DP OPTIMIZER: Adam | "
-        f"lr={learning_rate} | "
-        f"reason: dp={dp}, no_fl={no_fl}"
-    )
-
-    return opt
+    return Adam(learning_rate)
 
 
 def build_gru_model(
@@ -115,6 +88,7 @@ def build_gru_model(
     l2_norm_clip: Optional[float] = None,
     noise_multiplier: Optional[float] = None,
     num_microbatches: int = 1,
+    example_dp: Optional[dict] = None,
 ):
     inputs = layers.Input(shape=(sequence_len, multivariate))
     h = layers.GRU(units=16, return_sequences=True)(inputs)
@@ -128,7 +102,7 @@ def build_gru_model(
 
     outputs = layers.Dense(units=multivariate * sequence_len_y, activation="sigmoid")(h)
 
-    model = Model(inputs=inputs, outputs=outputs, name=model_name)
+    model = _construct(inputs, outputs, model_name, "mean_squared_error", example_dp)
 
     opt = make_optimizer(
         learning_rate=learning_rate,
@@ -153,6 +127,7 @@ def build_cifar10_cnn(
     l2_norm_clip: Optional[float] = None,
     noise_multiplier: Optional[float] = None,
     num_microbatches: int = 1,
+    example_dp: Optional[dict] = None,
 ):
     data_augmentation = keras.Sequential(
         [
@@ -204,7 +179,7 @@ def build_cifar10_cnn(
 
     outputs = layers.Dense(10, activation="softmax")(x)
 
-    model = Model(inputs, outputs, name=model_name)
+    model = _construct(inputs, outputs, model_name, "categorical_crossentropy", example_dp)
 
     opt = make_optimizer(
         learning_rate=learning_rate,
@@ -240,6 +215,7 @@ def build_tabular_classifier(
     l2_norm_clip: Optional[float] = None,
     noise_multiplier: Optional[float] = None,
     num_microbatches: int = 1,
+    example_dp: Optional[dict] = None,
 ):
     """
     Build a tabular binary classifier.
@@ -264,7 +240,7 @@ def build_tabular_classifier(
 
     outputs = layers.Dense(1, activation="sigmoid")(x)
 
-    model = Model(inputs, outputs, name=model_name)
+    model = _construct(inputs, outputs, model_name, "binary_crossentropy", example_dp)
 
     optimizer = make_optimizer(
         learning_rate=learning_rate,
@@ -345,6 +321,31 @@ def build_model(dataset_name: str, **kwargs):
         num_microbatches = 1
 
     # --------------------------------------------------------
+    # Example-level DP: build a DPSGDModel (per-example clip + noise) instead
+    # of a plain Model. Only when dp is on AND dp_level == "example".
+    # --------------------------------------------------------
+    dp_level = kwargs.get("dp_level", None)
+    if dp_level is None and cfg is not None:
+        dp_level = getattr(cfg, "dp_level", "client")
+    if dp_level is None:
+        dp_level = "client"
+
+    example_dp = None
+    if dp and dp_level == "example":
+        dp_seed_base = kwargs.get("dp_seed_base", 0)
+        use_vec = kwargs.get("example_use_vectorized", None)
+        if use_vec is None and cfg is not None:
+            use_vec = getattr(cfg, "example_use_vectorized", True)
+        if use_vec is None:
+            use_vec = True
+        example_dp = {
+            "l2_norm_clip": float(l2_norm_clip if l2_norm_clip is not None else 1.0),
+            "noise_multiplier": float(noise_multiplier if noise_multiplier is not None else 1.0),
+            "seed_base": int(dp_seed_base),
+            "use_vectorized": bool(use_vec),
+        }
+
+    # --------------------------------------------------------
     # Select model by dataset
     # --------------------------------------------------------
     if dataset_name in ["body_signal", "body_signal_of_smoking", "adult_census"]:
@@ -357,6 +358,7 @@ def build_model(dataset_name: str, **kwargs):
             l2_norm_clip=l2_norm_clip,
             noise_multiplier=noise_multiplier,
             num_microbatches=num_microbatches,
+            example_dp=example_dp,
         )
 
     if dataset_name == "cifar10":
@@ -368,9 +370,10 @@ def build_model(dataset_name: str, **kwargs):
             l2_norm_clip=l2_norm_clip,
             noise_multiplier=noise_multiplier,
             num_microbatches=num_microbatches,
+            example_dp=example_dp,
         )
 
-    if dataset_name == "network_monitoring":
+    if dataset_name in ["network_monitoring", "household_power"]:
         return build_gru_model(
             model_name=kwargs["model_name"],
             multivariate=kwargs["multivariate"],
@@ -381,6 +384,7 @@ def build_model(dataset_name: str, **kwargs):
             l2_norm_clip=l2_norm_clip,
             noise_multiplier=noise_multiplier,
             num_microbatches=num_microbatches,
+            example_dp=example_dp,
         )
 
     raise ValueError(f"Unknown dataset: {dataset_name}")

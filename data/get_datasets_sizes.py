@@ -13,6 +13,7 @@ CURRENT_DIR = Path(__file__).parent
 NETWORK_FILE = CURRENT_DIR / "./network_monitoring/buffer-20210415-20210526.tsv"
 CIFAR_FILE = CURRENT_DIR / "./cifar10/cifar10.npz"
 BODY_SMOKING_FILE = CURRENT_DIR / "./body_signal_of_smoking/data.csv"
+HOUSEHOLD_FILE = CURRENT_DIR / "./household_power/household_power_consumption.txt"
 
 # -----------------------------
 # Shared config
@@ -24,6 +25,10 @@ CFG_STRIDE = 1
 CFG_BATCH_SIZE = 1
 
 CFG_SPLIT = 0.8
+
+# household-power specific (mirrors data/household_power/dataset.py)
+CFG_RESAMPLE = "60min"
+HOUSEHOLD_FEATURES = ["Global_active_power", "Global_reactive_power"]
 
 
 def _env_float(name, default):
@@ -251,7 +256,85 @@ def get_body_smoking_sizes():
     }
 
 
+def get_household_power_sizes():
+    if not HOUSEHOLD_FILE.exists():
+        raise FileNotFoundError(
+            f"Household power file not found: {HOUSEHOLD_FILE}. Download UCI dataset id 235 "
+            "(https://archive.ics.uci.edu/dataset/235/individual+household+electric+power+consumption) "
+            "and unzip 'household_power_consumption.txt' into ./household_power/."
+        )
+
+    # same ingestion as data/household_power/dataset.py
+    df = pd.read_csv(HOUSEHOLD_FILE, sep=";", na_values=["?"], low_memory=False)
+    dt = pd.to_datetime(
+        df["Date"].astype(str) + " " + df["Time"].astype(str),
+        format="%d/%m/%Y %H:%M:%S",
+        errors="coerce",
+    )
+    df = df.set_index(dt)
+    df = df[HOUSEHOLD_FEATURES].apply(pd.to_numeric, errors="coerce")
+    df = df[~df.index.isna()].sort_index()
+
+    # hourly resample -> period 24 = one day; fill small gaps by time
+    minute_rows = len(df)
+    df = df.resample(CFG_RESAMPLE).mean().interpolate(method="time").dropna()
+
+    rows = len(df)
+    train_size = int(rows * CFG_DATA_SPLIT)
+    test_size = rows - train_size
+
+    np_train_raw = df.iloc[:train_size].to_numpy(dtype="float32")
+    np_test_raw = df.iloc[train_size:].to_numpy(dtype="float32")
+
+    train_effective = max(train_size - CFG_SEQUENCE_LEN, 0)
+    test_effective = max(test_size - CFG_SEQUENCE_LEN, 0)
+
+    tsg_params = {
+        "length": CFG_SEQUENCE_LEN,
+        "sampling_rate": CFG_SAMPLING_RATE,
+        "stride": CFG_STRIDE,
+        "batch_size": CFG_BATCH_SIZE,
+    }
+
+    tsg_train = TimeseriesGenerator(np_train_raw, np_train_raw, **tsg_params)
+    tsg_test = TimeseriesGenerator(np_test_raw, np_test_raw, **tsg_params)
+
+    x_train = np.array([tsg_train[i][0][0] for i in range(len(tsg_train))], dtype=np.float32)
+    y_train = np.array([tsg_train[i][1][0] for i in range(len(tsg_train))], dtype=np.float32)
+    x_test = np.array([tsg_test[i][0][0] for i in range(len(tsg_test))], dtype=np.float32)
+    y_test = np.array([tsg_test[i][1][0] for i in range(len(tsg_test))], dtype=np.float32)
+
+    print("\n=== Household power dataset ===")
+    print(f"Raw minute rows:       {minute_rows}")
+    print(f"Hourly total rows:     {rows}")
+    print(f"Hourly train rows:     {train_size}")
+    print(f"Hourly test rows:      {test_size}")
+    print(f"Sequence length:       {CFG_SEQUENCE_LEN}")
+    print(f"Effective train size:  {train_effective}")
+    print(f"Effective test size:   {test_effective}")
+    print(f"TSG train len:         {len(tsg_train)}")
+    print(f"TSG test len:          {len(tsg_test)}")
+    describe_array("household train raw", np_train_raw)
+    describe_array("household test raw", np_test_raw)
+    describe_array("household x_train", x_train)
+    describe_array("household y_train", y_train)
+    describe_array("household x_test", x_test)
+    describe_array("household y_test", y_test)
+
+    return {
+        "raw_minute": minute_rows,
+        "raw_total": rows,
+        "raw_train": train_size,
+        "raw_test": test_size,
+        "effective_train": len(tsg_train),
+        "effective_test": len(tsg_test),
+        "feature_count": np_train_raw.shape[1],
+    }
+
+
 if __name__ == "__main__":
-    network_sizes = get_network_sizes()
-    cifar_sizes = get_cifar10_sizes()
-    body_smoking_sizes = get_body_smoking_sizes()
+    household_sizes = get_household_power_sizes()
+    # network_sizes = get_network_sizes()
+    # cifar_sizes = get_cifar10_sizes()
+    # body_smoking_sizes = get_body_smoking_sizes()
+    

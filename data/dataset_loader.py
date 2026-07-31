@@ -42,6 +42,16 @@ def load_dataset(dataset_name: str, partition_type: str):
         return train, test, False
 
     # ======================================================
+    # HOUSEHOLD POWER  (independent public time-series benchmark)
+    # ======================================================
+    if dataset_name == "household_power":
+        from data.household_power.dataset import load_household_power
+        train, test = load_household_power()
+        print("[DATASET] Loaded Household Power (horizontal time-series).")
+        print(f"[DATASET] Train size = {len(train[0])}, Test size = {len(test[0])}")
+        return train, test, False
+
+    # ======================================================
     # UNKNOWN
     # ======================================================
     raise ValueError(f"Unknown dataset: {dataset_name}")

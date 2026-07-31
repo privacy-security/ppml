@@ -155,13 +155,9 @@ if gpus:
         for gpu in gpus:
             tf.config.experimental.set_memory_growth(gpu, True)
         logger.info("GPU memory growth enabled")
-
-        tf.config.set_logical_device_configuration(
-            gpus[0],
-            [tf.config.LogicalDeviceConfiguration(memory_limit=1024)]
-        )
     except RuntimeError as e:
-        logger.warning(f"Cannot enable memory growth: {e}")
+        pass
+        #logger.warning(f"Cannot enable memory growth: {e}")
 else:
     logger.info("No GPU detected – running on CPU")
 
@@ -238,23 +234,32 @@ def main(driver: Driver, ctx: Context) -> None:
         # Base FedAvg strategy
         # --------------------------------------------------------
 
+        # Build the initial global model so BOTH FedAvg and the DP wrapper start
+        # from the SAME concrete reference. Without this, Flower 1.9.0's
+        # DifferentialPrivacyServerSideFixedClipping has no reference model, clips
+        # each client update against a missing baseline, and training never learns
+        # (accuracy stuck at random) -- while plain FL is unaffected.
+        from flwr.common import ndarrays_to_parameters
+
+        init_model = build_model(
+            dataset_name=ExpConfig.DATASET,
+            model_name=ExpConfig.MODEL_NAME,
+            multivariate=ExpConfig.MULTIVARIATE,
+            sequence_len=ExpConfig.SEQUENCE_LEN,
+            config=ExpConfig,
+        )
+        initial_parameters = ndarrays_to_parameters(init_model.get_weights())
+        logger.info("Initial global parameters built and passed to strategy.")
+
         base_strategy = SavingFedAvg(
             evaluate_fn=evaluate_fn,
+            on_fit_config_fn=lambda rnd: {"server_round": int(rnd)},
             fit_metrics_aggregation_fn=(weighted_average if ExpConfig.FL_N_CLIENTS > 1 else None),
             evaluate_metrics_aggregation_fn=(weighted_average if ExpConfig.FL_N_CLIENTS > 1 else None),
+            initial_parameters=initial_parameters,
         )
 
         strategy = base_strategy
-        # strategy = FedAvg(
-        #     evaluate_fn=evaluate_fn,
-        #     fit_metrics_aggregation_fn=(
-        #         weighted_average if ExpConfig.FL_N_CLIENTS > 1 else None
-        #     ),
-        #     evaluate_metrics_aggregation_fn=(
-        #         weighted_average if ExpConfig.FL_N_CLIENTS > 1 else None
-        #     ),
-        # )
-
         logger.info("FedAvg strategy created")
 
         # --------------------------------------------------------
@@ -262,10 +267,15 @@ def main(driver: Driver, ctx: Context) -> None:
         # --------------------------------------------------------
         dp_enabled = wandb_config.get("dp", False)
         local_dp = wandb_config.get("local", False)
+        dp_level = wandb_config.get("dp_level", "client")
 
-        if dp_enabled:
-            noise = wandb_config.get("noise_multiplier", 1.0)
-            clip = wandb_config.get("l2_norm_clip", 1.0)
+        # Server-side DP wrapping (CDP) applies ONLY to client-level central DP.
+        # Example-level DP is enforced inside each client's DP-SGD train_step, and
+        # client-level LDP adds noise in the client update -- neither needs the
+        # server to wrap the strategy.
+        if dp_enabled and dp_level == "client":
+            noise = float(ExpConfig.noise_multiplier)   # calibrated from target epsilon
+            clip = float(ExpConfig.l2_norm_clip)
             clipping_type = wandb_config.get("clipping", "server")
 
             if not local_dp:
@@ -277,15 +287,12 @@ def main(driver: Driver, ctx: Context) -> None:
                         clip,
                         ExpConfig.FL_N_CLIENTS,
                     )
+                    init_p = strategy.initialize_parameters(client_manager=None) if hasattr(strategy, "initialize_parameters") else "N/A"
+                    logger.info(f"[DIAG] DP wrapper initial_parameters is None? "
+                                f"{init_p is None}  (base has initial_parameters? "
+                                f"{getattr(base_strategy, 'initial_parameters', None) is not None})")
 
                 elif clipping_type == "client":
-                    # if noise is None:
-                    #     # Compute noise from sensitivity, epsilon, delta
-                    #     eps = wandb_config["epsilon"]
-                    #     delta = wandb_config["delta"]
-                    #     clip = wandb_config["l2_norm_clip"]
-                    #     noise = clip * math.sqrt(2 * math.log(1.25 / delta)) / eps
-                    #     logger.info(f"[LOCAL DP] Computed noise multiplier = {noise}")
                     logger.info("Applying Server-side (Client Clipping) Differential Privacy")
                     strategy = DifferentialPrivacyClientSideFixedClipping(
                         strategy,
@@ -295,6 +302,9 @@ def main(driver: Driver, ctx: Context) -> None:
                     )
 
             logger.info(f"DP enabled: noise={noise}, clip={clip}, type={clipping_type}")
+        elif dp_enabled and dp_level == "example":
+            logger.info("Example-level DP: privacy enforced in client DP-SGD; "
+                        "no server-side DP wrapping.")
 
         # --------------------------------------------------------
         # Build LegacyContext (required for workflows)
@@ -332,76 +342,52 @@ def main(driver: Driver, ctx: Context) -> None:
         workflow(driver, legacy_context, ExpConfig.MODEL_HISTORY_SAVE_PATH)
 
         # --------------------------------------------------------
-        # Approximate FL DP accounting + W&B logging
+        # DP accounting + W&B logging (one clean block for CDP and LDP)
         # --------------------------------------------------------
         try:
-            if dp_enabled and not local_dp:
-                noise = float(wandb_config.get("noise_multiplier", 1.0))
-                num_rounds = int(ExpConfig.FL_ROUNDS)
+            if dp_enabled:
+                if dp_level == "example":
+                    mech = "example"
+                else:
+                    mech = "ldp" if local_dp else "cdp"
+                z = float(ExpConfig.noise_multiplier)
+                C = float(ExpConfig.l2_norm_clip)
+                R = int(ExpConfig.FL_ROUNDS)
+                M = int(ExpConfig.FL_N_CLIENTS)
+                delta = float(ExpConfig.delta)
 
-                # If you do not have a separate total client count, this assumes full participation
-                num_clients_sampled = int(ExpConfig.FL_N_CLIENTS)
-                num_clients_total = int(getattr(ExpConfig, "FL_TOTAL_CLIENTS", ExpConfig.FL_N_CLIENTS))
+                # client-level: eps from the client accountant (already on ExpConfig).
+                # example-level: eps is the record-level accountant value, also on
+                # ExpConfig (dp_epsilon_achieved), computed with q=batch/n_client.
+                eps = getattr(ExpConfig, "dp_epsilon_achieved", None)
+                if eps is None and dp_level == "client":
+                    eps = compute_fl_user_level_epsilon(M, M, R, z, delta)
 
-                # For user-level FL accounting, delta should usually be tied to number of clients
-                # delta = wandb_config.get("delta", None)
-                # if delta is None:
-                delta = 1.0 / (10*float(num_clients_total))
-                delta = float(delta)
+                # sampling rate: 1.0 at client level (full participation);
+                # q=batch/n_client at example level.
+                q = float(getattr(ExpConfig, "example_q", 1.0)) if dp_level == "example" else 1.0
 
-                fl_epsilon = compute_fl_user_level_epsilon(
-                    num_clients_total=num_clients_total,
-                    num_clients_sampled=num_clients_sampled,
-                    num_rounds=num_rounds,
-                    noise_multiplier=noise,
-                    delta=delta,
+                logger.info(
+                    f"[DP ACCOUNTANT] level={dp_level}, mechanism={mech}, "
+                    f"epsilon={eps:.6f}, delta={delta}, z={z:.6f}, C={C}, R={R}, M={M}, q={q:.6f}"
                 )
-
-                if fl_epsilon is not None:
-                    logger.info(
-                        f"[FL ACCOUNTANT] Approximate central-FL DP epsilon={fl_epsilon:.6f}"
-                    )
-                    try:
-                        wandb.log({
-                            "fl_dp_epsilon_approx": fl_epsilon,
-                            "fl_dp_delta_used": delta,
-                            "fl_dp_noise_multiplier": noise,
-                            "fl_dp_rounds": num_rounds,
-                            "fl_dp_sampled_clients": num_clients_sampled,
-                            "fl_dp_total_clients": num_clients_total,
-                            "fl_dp_sampling_rate": num_clients_sampled / num_clients_total,
-                        })
-                    except Exception:
-                        logger.warning("Failed to log FL accountant metrics to W&B.")
-
-            elif dp_enabled and local_dp:
-                # Local DP: do not run the central accountant, just log configured budget
-                total_eps = wandb_config.get("epsilon", None)
-                # For user-level FL accounting, delta should usually be tied to number of clients
-                total_delta = 1.0 / (10*float(num_clients_total))
-                
-                if total_eps is not None and total_delta is not None:
-                    total_eps = float(total_eps)
-                    total_delta = float(total_delta)
-                    num_rounds = int(ExpConfig.FL_ROUNDS)
-
-                    eps_per_round = total_eps / num_rounds
-                    delta_per_round = total_delta / num_rounds
-
-                    logger.info(
-                        f"[LDP CONFIG] total_eps={total_eps}, total_delta={total_delta}, "
-                        f"eps_per_round={eps_per_round}, delta_per_round={delta_per_round}"
-                    )
-                    try:
-                        wandb.log({
-                            "ldp_epsilon_total": total_eps,
-                            "ldp_delta_total": total_delta,
-                            "ldp_epsilon_per_round": eps_per_round,
-                            "ldp_delta_per_round": delta_per_round,
-                            "ldp_rounds": num_rounds,
-                        })
-                    except Exception:
-                        logger.warning("Failed to log LDP metrics to W&B.")
+                try:
+                    # run-level constants -> summary (avoids empty per-step columns)
+                    wandb.run.summary.update({
+                        "dp/level": dp_level,
+                        "dp/mechanism": mech,
+                        "dp/epsilon": float(eps),
+                        "dp/target_epsilon": float(ExpConfig.epsilon),
+                        "dp/delta": delta,
+                        "dp/noise_multiplier": z,
+                        "dp/clip_norm": C,
+                        "dp/rounds": R,
+                        "dp/clients": M,
+                        "dp/sampling_rate": q,
+                        "dp/seed": int(ExpConfig.SEED),
+                    })
+                except Exception:
+                    logger.warning("Failed to log DP metrics to W&B.")
 
         except Exception as e:
             logger.error(f"DP accountant/logging block failed: {e}")

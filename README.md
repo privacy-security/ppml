@@ -226,12 +226,7 @@ The first training run may download CIFAR-10 automatically if it is not already 
 
 ### Network Monitoring
 
-The network-monitoring dataset doesn't require any preparation but EDA notebook is still available at notebooks/ folder. You can run the notebook by executing next command:
-
-```bash
-source venv/bin/activate
-jupyter lab notebooks/network_monitoring_eda.ipynb
-```
+Prepare the network-monitoring dataset before running any `network_*` configuration. The expected workflow is the same as for the smoking dataset: place the raw data under `data/network_monitoring/`, run the corresponding notebook in `notebooks/`, and verify that the processed files expected by `data/dataset_loader.py` exist.
 
 ## Configuration Guide
 

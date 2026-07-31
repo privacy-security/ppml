@@ -3,6 +3,7 @@ wandb/
 data/body_signal_of_smoking/data.csv
 data/body_signal_of_smoking/data_processed.csv
 data/cifar10/cifar10.npz
+data/household_power/household_power_consumption/txt
 venv/
 venv_dp/
 artifacts/
@@ -22,3 +23,5 @@ attacks/server_log.txt
 server_log.txt
 metrics.csv
 notebooks/.ipynb_checkpoints
+results/
+config/attack_selection_summary.csv

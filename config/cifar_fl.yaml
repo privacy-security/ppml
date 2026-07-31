@@ -6,14 +6,12 @@ parameters:
   dataset:
     value: "cifar10"
   aggregation_type:
-    # values: ["regular", "secure"]
     value: "regular"
   dp:
     value: False
   n_clients:
     values: [3, 6, 10]
   partition_type:
-    # values: ["iid", "noniid"]
     value: "iid"
   learning_rate:
     value: 0.0005
@@ -22,8 +20,9 @@ parameters:
   epochs:
     value: 50
   l2_norm_clip:
-    # values: [0.1, 1, 5, 10]
-    values: [1, 5]
+    value: 70
+  seed:
+    values: [0, 1, 2, 3, 4]
 
 command:
   - ${env}

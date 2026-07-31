@@ -11,12 +11,10 @@ parameters:
     value: True
   local:
     value: True
+  epsilon:
+    values: [1, 3, 10, 30, 100, 300]
   l2_norm_clip:
     values: [1, 5]
-  epsilon:
-    values: [1, 3, 5]
-  # delta:
-  #   value: 1e-5
   partition_type:
     value: "iid"
   n_clients:
@@ -27,6 +25,8 @@ parameters:
     value: 128
   epochs:
     value: 30
+  seed:
+    values: [0, 1, 2, 3, 4]
 
 command:
   - ${env}

@@ -12,7 +12,6 @@ parameters:
   n_clients:
     values: [3, 6, 10]
   partition_type:
-    # values: ["iid", "noniid"]
     value: "iid"
   learning_rate:
     value: 0.001
@@ -21,8 +20,9 @@ parameters:
   epochs:
     value: 30
   l2_norm_clip:
-    values: [1, 5]
-  
+    value: 5
+  seed:
+    values: [0, 1, 2, 3, 4]
 
 command:
   - ${env}
