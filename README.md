@@ -2,6 +2,8 @@
 
 [Enhancement of Data Privacy Protection in Federated Learning](README-structure.md)
 
+![Privacy Enhanced Federated Llearning](./assets/FL-horizontal.png)
+
 ## Citation
 
 ```
