@@ -12,7 +12,8 @@
   author={Kokin, Hlib and Lytvyn, Oleksandr and Nguyen, Giang},
   journal={Scientific Reports},
   year={2026},
-  note={ CC BY-NC-ND 4.0 Deed}
-  publisher={Nature Portfolio, Nature Publishing Group UK London}
+  publisher={Nature Portfolio, Nature Publishing Group UK London},
+  note={ CC BY-NC-ND 4.0 Deed},
+  doi={10.1038/s41598-026-70584-5}
 }
 ```
